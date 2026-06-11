@@ -111,6 +111,11 @@ export async function processPdf(pdfUrl) {
   if (data.success === false) {
     const msg = data.error || 'Processing failed.'
 
+    // PDF download failed (404, 403, etc.)
+    if (data.errorCode === 'PDF_DOWNLOAD_FAILED') {
+      throw new ProcessingError(msg, 'PDF_DOWNLOAD_FAILED')
+    }
+
     // Gemini returned "no pnl found"
     if (typeof msg === 'string' && msg.toLowerCase().includes('no pnl found')) {
       throw new ProcessingError(

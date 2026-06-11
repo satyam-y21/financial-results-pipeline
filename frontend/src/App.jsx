@@ -59,10 +59,13 @@ export default function App() {
 
       if (err instanceof ProcessingError) {
         const isNoPnl = err.code === 'NO_PNL'
+        const isDownloadFail = err.code === 'PDF_DOWNLOAD_FAILED'
         setError({
-          title: isNoPnl ? 'No P&L Statement Found' : 'Processing Failed',
+          title: isNoPnl ? 'No P&L Statement Found'
+               : isDownloadFail ? 'PDF Not Accessible'
+               : 'Processing Failed',
           detail: err.message,
-          isWarn: isNoPnl,
+          isWarn: isNoPnl || isDownloadFail,
         })
       } else {
         setError({

@@ -102,7 +102,7 @@ body {
 
 .app-main {
   flex: 1;
-  max-width: 860px;
+  max-width: 1100px;
   width: 100%;
   margin: 0 auto;
   padding: 40px 24px 80px;
@@ -476,7 +476,6 @@ body {
 }
 
 .table-view {
-  overflow-x: auto;
   padding: 20px;
 }
 
@@ -503,8 +502,11 @@ body {
   padding: 7px 12px;
   text-align: right;
   border-bottom: 1px solid var(--border);
-  white-space: nowrap;
   font-variant-numeric: tabular-nums;
+}
+
+.pnl-table td:not(:first-child) {
+  white-space: nowrap;
 }
 
 .pnl-table td:first-child {
