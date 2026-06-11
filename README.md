@@ -28,8 +28,8 @@ financial-results-pipeline/
 ├── n8n/
 │   └── workflow.json                # n8n workflow export file
 ├── samples/
-│   ├── ivalue-q4-fy26.json          # Q4 extended format sample
-│   └── example-q1-fy26.json         # Q1 standard format sample
+│   ├── sample1.json          # Q4 extended format sample
+│   └── sample2.json         # Q1 standard format sample
 └── README.md                        # Setup and run guide
 ```
 
