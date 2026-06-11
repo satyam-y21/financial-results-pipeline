@@ -1,6 +1,12 @@
 # Financial Results Processor
 
-An end-to-end pipeline that accepts a BSE/NSE corporate result PDF link, sends it to Gemini for P&L extraction, and returns structured JSON to a React frontend.
+Financial Results Processor is an automated document processing pipeline built using n8n and Google Gemini 2.5 Flash.
+
+The system accepts a quarterly financial results PDF URL, downloads the document, uploads it to Gemini Files API, extracts Profit & Loss statement data, normalizes the information into a structured JSON schema, and returns the processed result through a webhook endpoint.
+
+The solution is designed to automate extraction of financial statement data from BSE/NSE corporate filings.
+
+This project uses React as frontend and N8N for automation workflow.
 
 ---
 
@@ -11,27 +17,40 @@ financial-results-pipeline/
 ├── frontend/
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── JsonViewer.jsx       # Syntax-highlighted JSON display
-│   │   │   ├── ResultPanel.jsx      # Header, tabs, copy/download
-│   │   │   └── TableView.jsx        # P&L rendered as HTML table
+│   │   │   ├── JsonViewer.jsx      
+│   │   │   ├── ResultPanel.jsx     
+│   │   │   └── TableView.jsx       
 │   │   ├── services/
-│   │   │   └── api.js               # Webhook call + error handling
+│   │   │   └── api.js
 │   │   ├── utils/
-│   │   │   └── jsonUtils.js         # Highlighting, table extraction
-│   │   ├── App.jsx                  # Main page + state machine
-│   │   ├── index.css                # All styles
-│   │   └── main.jsx                 # Entry point
-│   ├── .env.example                 # Template for environment variables
+│   │   │   └── jsonUtils.js
+│   │   ├── App.jsx         
+│   │   ├── index.css       
+│   │   └── main.jsx        
+│   ├── .env.example       
 │   ├── index.html
 │   ├── package.json
 │   └── vite.config.js
 ├── n8n/
-│   └── workflow.json                # n8n workflow export file
+│   └── workflow.json      
 ├── samples/
-│   ├── sample1.json          # Q4 extended format sample
-│   └── sample2.json         # Q1 standard format sample
-└── README.md                        # Setup and run guide
+│   ├── sample1.json       
+│   └── sample2.json
+└── README.md     
 ```
+
+---
+
+## Workflow Steps
+
+1. Receive PDF URL through webhook.
+2. Validate input.
+3. Download PDF.
+4. Upload PDF to Gemini Files API.
+5. Generate structured extraction request.
+6. Process document using Gemini 2.5 Flash.
+7. Parse and validate JSON output.
+8. Return structured response.
 
 ---
 
