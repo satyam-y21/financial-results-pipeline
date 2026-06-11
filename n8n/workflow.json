@@ -1,0 +1,392 @@
+{
+  "name": "Financial Results Processor",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "process-pdf",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "8168514c-22e0-40fc-b667-6f6debc88817",
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -464,
+        -32
+      ],
+      "webhookId": "process-pdf"
+    },
+    {
+      "parameters": {
+        "jsCode": "// n8n 2.x: body fields are promoted to top-level json keys by the Webhook node.\n// Fallback chain covers edge cases (nested body, raw string body).\nconst item = $input.first().json;\n\nconst raw =\n  item.pdf_url ||\n  item.body?.pdf_url ||\n  (typeof item.body === 'string' ? JSON.parse(item.body).pdf_url : undefined);\n\nif (!raw) {\n  throw new Error('Missing pdf_url. Send: {\"pdf_url\": \"https://...\"}');\n}\n\n// Sanitize: strip whitespace, newlines, zero-width chars\nconst pdfUrl = String(raw).replace(/[\\s\\u200B-\\u200D\\uFEFF]/g, '');\n\n// Validate URL using regex (avoids n8n VM URL constructor issues)\nconst urlPattern = /^https?:\\/\\/.+/i;\nif (!urlPattern.test(pdfUrl)) {\n  throw new Error('pdf_url must start with http:// or https://. Got: ' + pdfUrl.substring(0, 100));\n}\n\nreturn [{ json: { pdf_url: pdfUrl } }];"
+      },
+      "id": "64900d86-b985-4422-aed3-da3ae70f4a75",
+      "name": "Validate Input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -240,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.pdf_url }}",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "maxRedirects": 5
+            }
+          },
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "8b312101-d112-4158-b590-4ae45b2273b8",
+      "name": "Download PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -32,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Build the Gemini API request payload.\n// The PDF is passed as a fileURI.\n\nconst fileUri = $input.first().json.file.uri;\nconst mimeType = $input.first().json.file.mimeType;\n\nconst GEMINI_PROMPT = `You are a financial data processor that converts quarterly P&L statements into\nstandardized JSON format. You are only to look at the consolidated financial results.\nThe table can be under any form including but not limited 'FINANCIAL RESULTS FOR THE\nQUARTER / YEAR ENDED', 'STATEMENT OF AUDITED/UNADUITED CONSOLIDATED FINANCIAL RESULTS\nFOR THE HALF YEAR ENDED AND YEAR ENDED MARCH', 'CONSOLIDATED FINANCIAL RESULTS FOR THE\nQUARTER', 'Profit and Loss statement', 'PnL', 'Statement of Audited Financial Results\nfor the Half Year & Year ended' and so on.\nCritical: Look and process the standalone statement only and only if consolidated\nstatement is not present.\nImportant: If you don't find the profit and loss statement in the document just output\nno pnl found and nothing else.\n## 1. DATA EXTRACTION RULES\nCompany Name Extraction\n1. **Identify:** Look for legal entity markers (\"Limited\", \"Ltd\", \"Pvt\", \"Inc\").\n2. **Formatting:**\n* Use Title Case for names (e.g., \"Tata Motors\").\n* Keep acronyms ALL CAPS (e.g., \"ITC Limited\", \"H.G. Infra\").\n* If no name is found, output: \"Unknown Company\"\n## OUTPUT FORMAT (STRICT)\nReturn ONLY valid JSON with no explanations.\n### CRITICAL: Column count depends on the quarter type:\n**For Q1 and Q3** - output 4 columns per row (Particulars + 3 data columns):\n{\n\"company_name\": \"Tata Motors\",\n\"quarter_type\": \"standard\",\n\"row1\": [\"Particulars\", \"Q1 FY26\", \"Q4 FY25\", \"Q1 FY25\"],\n\"row2\": [\"Revenue\", \"3611.02\", \"3347.70\", \"4132.67\"],\n...\n}\n**For Q2** - output 6 columns per row (Particulars + 5 data columns, adding H1 of\ncurrent and previous year):\n{\n\"company_name\": \"Tata Motors\",\n\"quarter_type\": \"extended\",\n\"row1\": [\"Particulars\", \"Q2 FY26\", \"Q1 FY26\", \"Q2 FY25\", \"H1 FY26\", \"H1 FY25\"],\n\"row2\": [\"Revenue\", \"450.50\", \"425.30\", \"380.20\", \"875.80\", \"740.50\"],\n...\n}\n**For Q4** - output 6 columns per row (Particulars + 5 data columns, adding full year\ncurrent and previous year):\n{\n\"company_name\": \"Tata Motors\",\n\"quarter_type\": \"extended\",\n\"row1\": [\"Particulars\", \"Q4 FY26\", \"Q3 FY26\", \"Q4 FY25\", \"FY26\", \"FY25\"],\n\"row2\": [\"Revenue\", \"450.50\", \"425.30\", \"380.20\", \"1800.00\", \"1650.00\"],\n...\n}\n## TABLE STRUCTURE\n### Column Headers\n- Column 1: \"Particulars\"\n- Column 2: Most recent quarter\n- Column 3: Previous consecutive quarter\n- Column 4: Same quarter from previous year\n- Column 5 (Q2/Q4 only): H1 current year (Q2) OR Full Year current (Q4)\n- Column 6 (Q2/Q4 only): H1 previous year (Q2) OR Full Year previous (Q4)\n### Quarter Naming Convention\n- 30-Jun-25 -> Q1 FY26\n- 30-Sep-25 -> Q2 FY26\n- 31-Dec-25 -> Q3 FY26\n- 31-Mar-26 -> Q4 FY26\n### Row Order (Standard P&L)\n1. Revenue\n2. Expenses (leave values blank - heading only)\n3. [Expense line items - varies by company]\n4. Gross Profit*\n5. Gross Profit Margin*\n6. Employee Benefit Expense\n7. [Other operating expenses - varies]\n8. Other expenses\n9. Total Expenses*\n10. EBITDA*\n11. EBITDA Margin*\n12. Depreciation\n13. Finance Cost\n14. Profit before Exceptional Items, Other Income*\n15. Other Income\n16. [Exceptional items - if present]\n17. [Share of profit/loss in JV/Associate - if present]\n18. Profit/Loss Before Tax*\n19. Tax Expenses\n20. PAT*\n21. PAT Margin*\n22. EPS (Basic)\n*Calculated if missing\nYou are required to look at the given data and intelligently add or remove fields.\nNote:\n1. Service charges/Service Cost are not included in the gross profit calculation.\n2. Revenue is revenue from operations and not total revenue.\n3. If excise duty is present then there will be a net revenue = revenue - excise duty.\n4. Make sure that the values you pick and output are of the correct quarters.\n## CALCULATION FORMULAS\n**Gross Profit** = Revenue - COGS-type expenses\n**Gross Profit Margin** = (Gross Profit / Revenue) x 100\n**Total Expenses** = Sum of all expense line items (excluding Depreciation and Finance\nCost)\n**EBITDA** = Revenue - Total Operating Expenses (excluding Depreciation, Finance Cost\nand other income)\n**EBITDA Margin** = (EBITDA / Revenue) x 100\n**Profit before Exceptional Items, Other Income** = EBITDA - Depreciation - Finance Cost\n**Profit Before Tax** = EBITDA - Depreciation - Finance Cost + Other Income +/-\nExceptional items +/- Share of profit/loss in JV\n**PAT** = Profit Before Tax - Tax Expenses\n**PAT Margin** = (PAT / Revenue) x 100\n**EPS (Basic)** = Use provided value only; do not calculate\nFor Q2 and Q4, apply the same calculation formulas to the H1/FY columns.\n## DATA PROCESSING RULES\n- Convert ALL values to Rs Crores\n- Round to 2 decimal places\n- Treat \"-\" or null as 0 (except for EPS)\n- Add \"%\" suffix to all margin calculations\n- All numeric values must be strings in JSON\n- Verify all calculations before final output`;\n\n// Build request body as a plain object.\n// Stored under gemini_request_body so the Gemini node can reference it\n// as a single expression: ={{ $json.gemini_request_body }}\nconst requestBody = {\n  contents: [\n    {\n      parts: [\n        { text: GEMINI_PROMPT },\n        {\n          fileData: {\n            mimeType: mimeType,\n            fileUri: fileUri\n          }\n        }\n      ]\n    }\n  ],\n  generationConfig: {\n    temperature: 0.1,\n    maxOutputTokens: 16384\n  }\n};\n\nreturn [{ json: { gemini_request_body: requestBody } }];"
+      },
+      "id": "5de81a70-0857-4fb0-8cdb-34f974bb88df",
+      "name": "Prepare Gemini Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1216,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.gemini_request_body }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "id": "8b0d881e-4b50-4d2e-a4a5-81869a67682b",
+      "name": "Gemini API",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1424,
+        -32
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "gT3OAUv1qVKfLSmk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $input.first().json;\n\n// Extract text from Gemini response\nlet rawText = '';\ntry {\n  rawText = response.candidates[0].content.parts[0].text.trim();\n} catch (e) {\n  throw new Error('Gemini returned an unexpected response structure: ' + JSON.stringify(response));\n}\n\n// Check for the \"no pnl found\" sentinel\nif (rawText.toLowerCase() === 'no pnl found') {\n  return [{ json: { success: false, error: 'no pnl found' } }];\n}\n\n// Strip markdown code fences if present (e.g. ```json ... ```)\nlet cleaned = rawText\n  .replace(/^```json\\s*\\n?/i, '')\n  .replace(/^```\\s*\\n?/i, '')\n  .replace(/\\n?```\\s*$/i, '')\n  .trim();\n\n// Parse JSON\nlet parsed;\ntry {\n  parsed = JSON.parse(cleaned);\n} catch (e) {\n  throw new Error('Gemini returned invalid JSON. Raw text: ' + rawText.substring(0, 500));\n}\n\n// Basic sanity check: must have at least row1\nif (!parsed.row1 || !Array.isArray(parsed.row1)) {\n  throw new Error('Parsed JSON is missing row1 (header row). Output: ' + JSON.stringify(parsed).substring(0, 500));\n}\n\nreturn [{ json: { success: true, result: parsed } }];"
+      },
+      "id": "8b64c3b8-88f8-4bee-91ec-e67348f74ddf",
+      "name": "Parse Gemini Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1648,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              },
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          }
+        }
+      },
+      "id": "a002ee5a-3083-4484-826b-87f42f751ed0",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1872,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare the metadata required by Google Files API upload.\nconst binaryData = $input.first().binary;\nif (!binaryData) {\n  throw new Error('PDF download returned no binary data. Check the URL.');\n}\n\nconst binaryKey = Object.keys(binaryData)[0];\nconst fileData = binaryData[binaryKey];\n\nreturn [{\n  json: {\n    fileSize: fileData.bytes,\n    mimeType: fileData.mimeType || 'application/pdf',\n    binaryKey: binaryKey\n  },\n  binary: binaryData\n}];"
+      },
+      "id": "4ef72f60-a164-40f6-8dc3-340f7122edc5",
+      "name": "Prepare Upload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        176,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/upload/v1beta/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googlePalmApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Goog-Upload-Protocol",
+              "value": "resumable"
+            },
+            {
+              "name": "X-Goog-Upload-Command",
+              "value": "start"
+            },
+            {
+              "name": "X-Goog-Upload-Header-Content-Length",
+              "value": "={{ $json.fileSize }}"
+            },
+            {
+              "name": "X-Goog-Upload-Header-Content-Type",
+              "value": "={{ $json.mimeType }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"file\": { \"display_name\": \"Quarterly Results PDF\" } }",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "4e721d30-e2a2-4aaa-b228-17f1363057a0",
+      "name": "Start Gemini Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        416,
+        -32
+      ],
+      "credentials": {
+        "googlePalmApi": {
+          "id": "gT3OAUv1qVKfLSmk",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.headers['x-goog-upload-url'] }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Goog-Upload-Command",
+              "value": "upload, finalize"
+            },
+            {
+              "name": "X-Goog-Upload-Offset",
+              "value": "0"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "3af1535f-7901-4b68-aa1e-1cf86e4178c7",
+      "name": "Upload PDF Bytes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        912,
+        -32
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combinationMode": "mergeByPosition",
+        "options": {}
+      },
+      "id": "bd91f210-c874-4438-b992-992ce864f7c6",
+      "name": "Merge Binary",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [
+        672,
+        -32
+      ]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Input": {
+      "main": [
+        [
+          {
+            "node": "Download PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download PDF": {
+      "main": [
+        [
+          {
+            "node": "Prepare Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Upload": {
+      "main": [
+        [
+          {
+            "node": "Start Gemini Upload",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Merge Binary",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Start Gemini Upload": {
+      "main": [
+        [
+          {
+            "node": "Merge Binary",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Binary": {
+      "main": [
+        [
+          {
+            "node": "Upload PDF Bytes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload PDF Bytes": {
+      "main": [
+        [
+          {
+            "node": "Prepare Gemini Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Gemini Request": {
+      "main": [
+        [
+          {
+            "node": "Gemini API",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini API": {
+      "main": [
+        [
+          {
+            "node": "Parse Gemini Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Gemini Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "182ed6e6-745e-46a5-b567-9f2c84d823a7",
+  "meta": {
+    "instanceId": "c60aafff5dae81a11d994e47bfdb29c0d3dfc9cab0317b9ee077f71a3b6ae693"
+  },
+  "id": "A1Qsby4WhebZnmes",
+  "tags": []
+}
